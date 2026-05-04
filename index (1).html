@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Front Back — 45 Days</title>
+<link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600&family=Tiro+Bangla&display=swap" rel="stylesheet">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBHJwML38xroJoCCJ-uuzA-BUSehpyDhCM",
+    authDomain: "choll-comeback-deii.firebaseapp.com",
+    databaseURL: "https://choll-comeback-deii-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "choll-comeback-deii",
+    storageBucket: "choll-comeback-deii.firebasestorage.app",
+    messagingSenderId: "199480008082",
+    appId: "1:199480008082:web:70739d9efd0bc13ee4754b"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.database();
+  const provider = new firebase.auth.GoogleAuthProvider();
+
+  let currentUser = null;
+  let state = {};
+
+  // This section is now integrated into the auth.onAuthStateChanged above
+
+  function loginWithGoogle() {
+    auth.signInWithPopup(provider).catch(e => {
+      alert("Login হয়নি: " + e.message);
+    });
+  }
+
+  function logout() {
+    auth.signOut();
+  }
+
+  function saveKey(key, val) {
+    state[key] = val;
+    db.ref(`users/${currentUser.uid}/progress/${key}`).set(val);
+    updateProgress();
+  }
+
+  function updateProgress() {
+    const allCbs = document.querySelectorAll('.task-cb');
+    let total = 0, done = 0;
+    allCbs.forEach(cb => {
+      if (!cb.dataset.revision) { total++; if (cb.checked) done++; }
+    });
+    const pct = total ? Math.round(done / total * 100) : 0;
+    const bar = document.getElementById('pbar');
+    const lbl = document.getElementById('plabel');
+    if (bar) bar.style.width = pct + '%';
+    if (lbl) lbl.textContent = done + ' / ' + total + ' (' + pct + '%)';
+    updateWeekBadges();
+  }
+
+  function updateWeekBadges() {
+    document.querySelectorAll('.week-block').forEach(wb => {
+      const cbs = wb.querySelectorAll('.task-cb:not([data-revision])');
+      let wt = cbs.length, wc = 0;
+      cbs.forEach(cb => { if (cb.checked) wc++; });
+      const badge = wb.querySelector('.week-badge');
+      if (badge) badge.textContent = wc + '/' + wt;
+    });
+  }
+
+  function renderTracker() {
+    const tracker = document.getElementById('tracker');
+    if (!tracker) return;
+    tracker.innerHTML = '';
+
+    weeks.forEach(week => {
+      const wDays = days.filter(d => week.days.includes(d.d));
+      const wb = document.createElement('div');
+      wb.className = 'week-block';
+
+      const wh = document.createElement('div');
+      wh.className = 'week-header';
+      wh.innerHTML = `<span>${week.label}</span><span class="week-badge">0/0</span>`;
+      wb.appendChild(wh);
+
+      wDays.forEach(day => {
+        const row = document.createElement('div');
+        row.className = 'day-row' + (day.revision ? ' revision' : '');
+
+        const dl = document.createElement('div');
+        dl.className = 'day-label';
+        dl.innerHTML = `<span class="day-num-badge">Day ${day.d}</span>${day.revision ? ' — রিভিশন ও পরীক্ষা' : ''}`;
+        row.appendChild(dl);
+
+        const tg = document.createElement('div');
+        tg.className = 'tasks';
+
+        day.tasks.forEach((task, ti) => {
+          const key = `d${day.d}t${ti}`;
+          const checked = !!state[key];
+          const item = document.createElement('div');
+          item.className = 'task-item';
+          const lbl = document.createElement('label');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'task-cb';
+          cb.checked = checked;
+          if (day.revision) cb.dataset.revision = '1';
+          cb.addEventListener('change', function() {
+            span.className = 'task-text' + (this.checked ? ' done' : '');
+            saveKey(key, this.checked);
+          });
+          const span = document.createElement('span');
+          span.className = 'task-text' + (checked ? ' done' : '');
+          if (task.s && subjectClass[task.s] && task.s !== '') {
+            const badge = document.createElement('span');
+            badge.className = 'sbadge ' + subjectClass[task.s];
+            badge.textContent = task.s;
+            span.appendChild(badge);
+          }
+          span.appendChild(document.createTextNode(task.t));
+          lbl.appendChild(cb);
+          lbl.appendChild(span);
+          item.appendChild(lbl);
+          tg.appendChild(item);
+        });
+
+        row.appendChild(tg);
+        wb.appendChild(row);
+      });
+
+      tracker.appendChild(wb);
+    });
+
+    updateWeekBadges();
+  }
+
+  function showLogin() {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-screen').style.display = 'none';
+  }
+
+  function showApp(user) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-screen').style.display = 'block';
+    document.getElementById('user-name').textContent = user.displayName || user.email;
+    const avatar = document.getElementById('user-avatar');
+    if (user.photoURL) {
+      avatar.style.backgroundImage = `url(${user.photoURL})`;
+      avatar.style.backgroundSize = 'cover';
+      avatar.textContent = '';
+    } else {
+      avatar.textContent = (user.displayName || 'U')[0].toUpperCase();
+    }
+    loadLeaderboard();
+  }
+
+  function toggleLeaderboard() {
+    const lb = document.getElementById('leaderboard');
+    if (lb.style.display === 'none') {
+      lb.style.display = 'flex';
+      loadLeaderboard();
+    } else {
+      lb.style.display = 'none';
+    }
+  }
+
+  function loadLeaderboard() {
+    const usersRef = db.ref('users');
+    usersRef.once('value', snapshot => {
+      const users = [];
+      snapshot.forEach(userSnap => {
+        const uid = userSnap.key;
+        const progress = userSnap.child('progress').val() || {};
+        const profile = userSnap.child('profile').val() || {};
+        
+        let total = 0, done = 0;
+        for (const key in progress) {
+          if (!key.startsWith('d') || key.includes('revision')) continue;
+          total++;
+          if (progress[key]) done++;
+        }
+        
+        // Count total tasks properly
+        days.forEach(day => {
+          if (!day.revision) {
+            day.tasks.forEach(() => total++);
+          }
+        });
+        total = 126; // Fixed total for all users
+        
+        const pct = total ? Math.round(done / total * 100) : 0;
+        
+        users.push({
+          uid,
+          name: profile.name || 'Unknown User',
+          email: profile.email || '',
+          photoURL: profile.photoURL || '',
+          done,
+          total,
+          pct
+        });
+      });
+      
+      users.sort((a, b) => b.pct - a.pct || b.done - a.done);
+      renderLeaderboard(users);
+    });
+  }
+
+  function renderLeaderboard(users) {
+    const list = document.getElementById('lb-list');
+    if (!users.length) {
+      list.innerHTML = '<div class="loading">এখনও কেউ নেই</div>';
+      return;
+    }
+    
+    list.innerHTML = '';
+    users.forEach((u, i) => {
+      const item = document.createElement('div');
+      item.className = 'lb-item' + (u.uid === currentUser.uid ? ' lb-you' : '');
+      
+      const rank = document.createElement('div');
+      rank.className = 'lb-rank';
+      if (i === 0) rank.className += ' top1';
+      else if (i === 1) rank.className += ' top2';
+      else if (i === 2) rank.className += ' top3';
+      rank.textContent = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+      
+      const userDiv = document.createElement('div');
+      userDiv.className = 'lb-user';
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'lb-user-name';
+      nameDiv.textContent = u.name + (u.uid === currentUser.uid ? ' (You)' : '');
+      userDiv.appendChild(nameDiv);
+      
+      const progDiv = document.createElement('div');
+      progDiv.className = 'lb-progress';
+      const pctDiv = document.createElement('div');
+      pctDiv.className = 'lb-pct';
+      pctDiv.textContent = u.pct + '%';
+      const tasksDiv = document.createElement('div');
+      tasksDiv.className = 'lb-tasks';
+      tasksDiv.textContent = u.done + '/' + u.total;
+      progDiv.appendChild(pctDiv);
+      progDiv.appendChild(tasksDiv);
+      
+      item.appendChild(rank);
+      item.appendChild(userDiv);
+      item.appendChild(progDiv);
+      list.appendChild(item);
+    });
+  }
+
+  // Save user profile on login
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      currentUser = user;
+      // Save profile
+      db.ref(`users/${user.uid}/profile`).set({
+        name: user.displayName || user.email,
+        email: user.email,
+        photoURL: user.photoURL || ''
+      });
+      showApp(user);
+      const dbRef = db.ref(`users/${user.uid}/progress`);
+      dbRef.on('value', snapshot => {
+        state = snapshot.val() || {};
+        renderTracker();
+        updateProgress();
+      });
+    } else {
+      currentUser = null;
+      showLogin();
+    }
+  });
+</script>
+
+<style>
+:root {
+  --bg: #f5f0e8;
+  --card: #fffdf8;
+  --border: #e0d8cc;
+  --accent: #c0392b;
+  --accent2: #8b2318;
+  --text: #1a1410;
+  --text2: #6b5f52;
+  --text3: #9e8f7f;
+  --done: #b8ad9e;
+  --week-bg: #f0e9dc;
+  --rev-bg: #fdf5ec;
+  --prog-bg: #e0d8cc;
+  --prog-fill: #639922;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);font-family:'Hind Siliguri',sans-serif;color:var(--text);min-height:100vh}
+
+#login-screen{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:100vh;padding:2rem;text-align:center;
+}
+.login-card{
+  background:var(--card);border:1px solid var(--border);border-radius:16px;
+  padding:2.5rem 2rem;max-width:380px;width:100%;
+}
+.login-logo{
+  width:60px;height:60px;background:var(--accent);border-radius:12px;
+  display:flex;align-items:center;justify-content:center;margin:0 auto 1.25rem;
+  font-family:'Tiro Bangla',serif;color:white;font-size:28px;
+}
+.login-card h1{font-family:'Tiro Bangla',serif;font-size:22px;font-weight:400;margin-bottom:6px}
+.login-card p{font-size:14px;color:var(--text2);margin-bottom:1.75rem;line-height:1.6}
+.google-btn{
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  width:100%;padding:12px 20px;background:white;border:1px solid var(--border);
+  border-radius:10px;font-family:'Hind Siliguri',sans-serif;font-size:15px;
+  color:var(--text);cursor:pointer;transition:background 0.15s;font-weight:500;
+}
+.google-btn:hover{background:#f8f4ee}
+.google-btn svg{width:20px;height:20px;flex-shrink:0}
+
+#app-screen{display:none}
+header{
+  background:var(--accent);color:white;padding:1.25rem 1.5rem;
+  display:flex;align-items:center;gap:12px;position:relative;overflow:hidden;
+}
+header::after{
+  content:'';position:absolute;right:-30px;top:-30px;
+  width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.07);
+}
+.header-left{flex:1}
+.header-left h1{font-family:'Tiro Bangla',serif;font-size:20px;font-weight:400}
+.header-left p{font-size:12px;opacity:0.75;margin-top:2px}
+.user-area{display:flex;align-items:center;gap:8px;z-index:1}
+#user-avatar{
+  width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,0.25);
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0;
+}
+#user-name{font-size:13px;opacity:0.9;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logout-btn{
+  background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+  color:white;font-family:'Hind Siliguri',sans-serif;font-size:12px;
+  padding:4px 10px;border-radius:20px;cursor:pointer;transition:background 0.15s;
+}
+.logout-btn:hover{background:rgba(255,255,255,0.25)}
+
+.prog-wrap{
+  background:var(--card);border-bottom:1px solid var(--border);
+  padding:10px 1.5rem;position:sticky;top:0;z-index:10;
+  display:flex;align-items:center;gap:12px;
+}
+.prog-bar-outer{flex:1;background:var(--prog-bg);border-radius:20px;height:8px;overflow:hidden}
+.prog-bar-inner{height:100%;background:var(--prog-fill);border-radius:20px;transition:width 0.4s;width:0%}
+.prog-label{font-size:12px;color:var(--text2);white-space:nowrap;min-width:110px;text-align:right}
+
+.content{max-width:680px;margin:0 auto;padding:1.25rem 1rem;padding-bottom:3rem}
+
+.week-block{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:1rem;overflow:hidden}
+.week-header{background:var(--week-bg);border-bottom:1px solid var(--border);padding:8px 14px;display:flex;justify-content:space-between;align-items:center}
+.week-header>span:first-child{font-size:13px;font-weight:600;color:var(--accent2)}
+.week-badge{font-size:12px;color:var(--text3);background:var(--bg);padding:2px 8px;border-radius:20px;border:1px solid var(--border)}
+
+.day-row{border-bottom:1px solid var(--border);padding:10px 14px}
+.day-row:last-child{border-bottom:none}
+.day-row.revision{background:var(--rev-bg)}
+.day-label{font-size:11px;font-weight:600;color:var(--text3);margin-bottom:7px;display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.04em}
+.day-num-badge{background:var(--accent);color:white;font-size:10px;padding:1px 7px;border-radius:20px;font-weight:600}
+.revision .day-num-badge{background:#c07d30}
+
+.tasks{display:flex;flex-direction:column;gap:6px}
+.task-item label{display:flex;align-items:flex-start;gap:9px;cursor:pointer}
+.task-cb{margin-top:3px;width:15px;height:15px;cursor:pointer;accent-color:var(--prog-fill);flex-shrink:0}
+.task-text{font-size:14px;color:var(--text);line-height:1.5;transition:color 0.2s}
+.task-text.done{text-decoration:line-through;color:var(--done)}
+
+.sbadge{display:inline-block;font-size:10px;padding:1px 7px;border-radius:20px;margin-right:5px;font-weight:600;vertical-align:middle}
+.sb-bangla{background:#EAF3DE;color:#3B6D11}
+.sb-english{background:#DDEEFF;color:#185FA5}
+.sb-physics{background:#FFF2DC;color:#7a4800}
+.sb-chemistry{background:#FAECE7;color:#993C1D}
+.sb-biology{background:#E1F5EE;color:#0F6E56}
+.sb-math{background:#EEEDFE;color:#3C3489}
+.sb-hmath{background:#FBEAF0;color:#72243E}
+.sb-bgs{background:#EFECE6;color:#4a3f33}
+.sb-ict{background:#E2F4E2;color:#1f6b1f}
+.sb-dhormo{background:#F1EFE8;color:#5F5E5A}
+.loading{text-align:center;padding:3rem;color:var(--text3);font-size:15px}
+
+.leaderboard-toggle{
+  max-width:680px;margin:0 auto;padding:0.75rem 1rem;
+}
+.leaderboard-toggle button{
+  width:100%;padding:12px;background:var(--accent);color:white;
+  border:none;border-radius:10px;font-family:'Hind Siliguri',sans-serif;
+  font-size:15px;font-weight:600;cursor:pointer;transition:background 0.2s;
+}
+.leaderboard-toggle button:hover{background:var(--accent2)}
+
+.leaderboard-panel{
+  position:fixed;top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,0.5);z-index:100;
+  display:flex;align-items:center;justify-content:center;padding:1rem;
+}
+.lb-header{
+  background:var(--accent);color:white;padding:1rem 1.25rem;
+  border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center;
+}
+.lb-header h2{font-family:'Tiro Bangla',serif;font-size:20px;font-weight:400}
+.lb-close{
+  background:rgba(255,255,255,0.2);border:none;color:white;
+  width:32px;height:32px;border-radius:50%;cursor:pointer;
+  font-size:18px;transition:background 0.2s;
+}
+.lb-close:hover{background:rgba(255,255,255,0.3)}
+.lb-content{
+  background:var(--card);max-width:500px;width:100%;
+  max-height:60vh;overflow-y:auto;border-radius:0 0 12px 12px;
+}
+.lb-item{
+  padding:12px 1.25rem;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:12px;
+}
+.lb-item:last-child{border-bottom:none}
+.lb-rank{
+  font-size:18px;font-weight:700;color:var(--text3);min-width:35px;
+}
+.lb-rank.top1{color:#FFD700}
+.lb-rank.top2{color:#C0C0C0}
+.lb-rank.top3{color:#CD7F32}
+.lb-user{flex:1}
+.lb-user-name{font-size:14px;font-weight:600;color:var(--text)}
+.lb-user-email{font-size:12px;color:var(--text3);margin-top:2px}
+.lb-progress{text-align:right}
+.lb-pct{font-size:20px;font-weight:700;color:var(--accent)}
+.lb-tasks{font-size:11px;color:var(--text3);margin-top:2px}
+.lb-you{background:var(--week-bg)}
+
+@media(max-width:480px){
+  header{padding:1rem}
+  .header-left h1{font-size:17px}
+  #user-name{display:none}
+  .content{padding:1rem 0.75rem}
+  .task-text{font-size:13px}
+}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">F</div>
+    <h1>Front Back</h1>
+    <p>৪৫ দিনের study plan tracker<br>Google দিয়ে login করো</p>
+    <button class="google-btn" onclick="loginWithGoogle()">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+      </svg>
+      Google দিয়ে login করো
+    </button>
+  </div>
+</div>
+
+<div id="app-screen">
+  <header>
+    <div class="header-left">
+      <h1>Front Back — 45 Days</h1>
+      <p>প্রতিটি task complete হলে tick করো</p>
+    </div>
+    <div class="user-area">
+      <div id="user-avatar"></div>
+      <span id="user-name"></span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <div class="prog-wrap">
+    <div class="prog-bar-outer"><div class="prog-bar-inner" id="pbar"></div></div>
+    <div class="prog-label" id="plabel">লোড হচ্ছে...</div>
+  </div>
+
+  <div class="leaderboard-toggle">
+    <button onclick="toggleLeaderboard()" id="lb-btn">🏆 Leaderboard দেখো</button>
+  </div>
+
+  <div class="leaderboard-panel" id="leaderboard" style="display:none">
+    <div class="lb-header">
+      <h2>🏆 Progress Leaderboard</h2>
+      <button class="lb-close" onclick="toggleLeaderboard()">✕</button>
+    </div>
+    <div class="lb-content" id="lb-list">
+      <div class="loading">Leaderboard লোড হচ্ছে...</div>
+    </div>
+  </div>
+
+  <div class="content">
+    <div id="tracker"><div class="loading">তোমার progress লোড হচ্ছে...</div></div>
+  </div>
+</div>
+
+<script>
+const days = [
+  {d:1,tasks:[{s:"Bangla 1st",t:"সুভা"},{s:"English 1st",t:"Unit 1: Sense of Self"},{s:"Physics",t:"অধ্যায় ২: গতি"}]},
+  {d:2,tasks:[{s:"Bangla 2nd",t:"ধ্বনি ও বর্ণ"},{s:"English 2nd",t:"Gap Filling with Clues"},{s:"Chemistry",t:"অধ্যায় ৪: পর্যায় সারণি"}]},
+  {d:3,tasks:[{s:"Bangla 1st",t:"বই পড়া"},{s:"English 1st",t:"Unit 2: Climate Change"},{s:"Math",t:"অধ্যায় ২: সেট ও ফাংশন"}]},
+  {d:4,tasks:[{s:"Bangla 2nd",t:"স্বরধ্বনি ও ব্যঞ্জনধ্বনি"},{s:"English 2nd",t:"Substitution Table"},{s:"H.math",t:"অধ্যায় ২: বীজগাণিতিক রাশি"}]},
+  {d:5,tasks:[{s:"Bangla 1st",t:"অভাগীর স্বর্গ"},{s:"English 1st",t:"Unit 4: Events and Festivals"},{s:"Biology",t:"অধ্যায় ২: জীবকোষ ও টিস্যু"}]},
+  {d:6,tasks:[{s:"Bangla 2nd",t:"শব্দ ও পদের গঠন"},{s:"English 2nd",t:"Right Forms of Verb"},{s:"BGS",t:"বাংলাদেশের স্বাধীনতা"}]},
+  {d:7,revision:true,tasks:[{s:"",t:"সারা সপ্তাহের পড়া রিভিশন দাও"},{s:"",t:"এক্সাম দিয়ে নিজেকে যাচাই করো"},{s:"",t:"ভুল গুলো ঠিক করে নাও"}]},
+  {d:8,tasks:[{s:"Bangla 1st",t:"আম-আঁটির ভেঁপু"},{s:"Bangla 2nd",t:"প্রত্যয় দিয়ে শব্দ গঠন / সমাস প্রক্রিয়ায় শব্দ গঠন"},{s:"Physics",t:"অধ্যায় ৩: বল"}]},
+  {d:9,tasks:[{s:"English 1st",t:"Unit 6: Our Neighbours"},{s:"English 2nd",t:"Changing Sentences (Affirmative, Negative, Assertive, Interrogative, Exclamatory, Simple, Complex, Compound)"},{s:"Chemistry",t:"অধ্যায় ৫: রাসায়নিক বন্ধন"}]},
+  {d:10,tasks:[{s:"Bangla 1st",t:"নিমগাছ"},{s:"Bangla 2nd",t:"শব্দের শ্রেণিবিভাগ"},{s:"Biology",t:"অধ্যায় ৩: কোষ বিভাজন"}]},
+  {d:11,tasks:[{s:"English 1st",t:"Unit 8: World Heritage"},{s:"English 2nd",t:"Tag Questions"},{s:"Math",t:"অধ্যায় ৩: বীজগাণিতিক রাশি"}]},
+  {d:12,tasks:[{s:"Bangla 1st",t:"উপেক্ষিত শক্তির উদ্বোধন"},{s:"Bangla 2nd",t:"বিশেষ্য / সর্বনাম / বিশেষণ"},{s:"H.math",t:"অধ্যায় ৭: অসীম ধারা"}]},
+  {d:13,tasks:[{s:"English 1st",t:"Unit 10: Dreams"},{s:"English 2nd",t:"Suffixes and Prefixes"},{s:"BGS",t:"সৌরজগৎ ও ভূমণ্ডল"}]},
+  {d:14,revision:true,tasks:[{s:"",t:"সারা সপ্তাহের পড়া রিভিশন দাও"},{s:"",t:"এক্সাম দিয়ে নিজেকে যাচাই করো"},{s:"",t:"ভুল গুলো ঠিক করে নাও"}]},
+  {d:15,tasks:[{s:"Bangla 1st",t:"প্রবাস বন্ধু"},{s:"English 1st",t:"Unit 11: Reading from English Literature"},{s:"Physics",t:"অধ্যায় ৪: কাজ, ক্ষমতা ও শক্তি"}]},
+  {d:16,tasks:[{s:"Bangla 2nd",t:"ক্রিয়া / ক্রিয়া বিশেষণ"},{s:"English 2nd",t:"Preposition"},{s:"Chemistry",t:"অধ্যায় ৭: রাসায়নিক বিক্রিয়া"}]},
+  {d:17,tasks:[{s:"Bangla 1st",t:"মমতাদি"},{s:"English 1st",t:"Unit 12: Roots"},{s:"Math",t:"অধ্যায় ৭: ব্যবহারিক জ্যামিতি"}]},
+  {d:18,tasks:[{s:"Bangla 2nd",t:"অনুসর্গ / যোজক / আবেগ"},{s:"English 2nd",t:"Connectors / Linking words"},{s:"H.math",t:"অধ্যায় ৮: ত্রিকোণমিতি"}]},
+  {d:19,tasks:[{s:"Bangla 1st",t:"একুশের গল্প"},{s:"English 1st",t:"Unit 13: Loneliness"},{s:"Biology",t:"অধ্যায় ৫: খাদ্য, পুষ্টি এবং পরিপাক"}]},
+  {d:20,tasks:[{s:"Bangla 2nd",t:"ক্রিয়াবিভক্তি"},{s:"English 2nd",t:"Punctuation and Capitalization"},{s:"BGS",t:"রাষ্ট্র, নাগরিকতা ও আইন"}]},
+  {d:21,revision:true,tasks:[{s:"",t:"সারা সপ্তাহের পড়া রিভিশন দাও"},{s:"",t:"এক্সাম দিয়ে নিজেকে যাচাই করো"},{s:"",t:"ভুল গুলো ঠিক করে নাও"}]},
+  {d:22,tasks:[{s:"Bangla 1st",t:"উপন্যাস: ১৯৭১"},{s:"English 1st",t:"Unit 14: Renewable Energy"},{s:"Physics",t:"অধ্যায় ৬: পদার্থের অবস্থা ও চাপ"}]},
+  {d:23,tasks:[{s:"Bangla 2nd",t:"বাক্যের অংশ ও শ্রেণিবিভাগ / বাক্যের বর্গ"},{s:"English 2nd",t:"Writing Paragraph"},{s:"Chemistry",t:"অধ্যায় ৮: রসায়ন ও শক্তি"}]},
+  {d:24,tasks:[{s:"Bangla 1st",t:"নাটক: বহিপীর"},{s:"English 1st",t:"Unit 15: Media and Modes of E-communication"},{s:"Math",t:"অধ্যায় ৮: বৃত্ত"}]},
+  {d:25,tasks:[{s:"Bangla 2nd",t:"সরল, জটিল ও যৌগিক বাক্য"},{s:"English 2nd",t:"Writing E-mail/Letter/Application"},{s:"H.math",t:"অধ্যায় ৯: সুচকীয় ও লগারিদমীয় ফাংশন"}]},
+  {d:26,tasks:[{s:"Bangla 1st",t:"কপোতাক্ষ নদ"},{s:"English 1st",t:"Unit 16: Graffiti"},{s:"Biology",t:"অধ্যায় ১০: সমন্বয়"}]},
+  {d:27,tasks:[{s:"Bangla 2nd",t:"বাগধারা / শব্দজোড়"},{s:"English 2nd",t:"Writing Short Composition"},{s:"BGS",t:"জাতিসংঘ ও বাংলাদেশ"}]},
+  {d:28,revision:true,tasks:[{s:"",t:"সারা সপ্তাহের পড়া রিভিশন দাও"},{s:"",t:"এক্সাম দিয়ে নিজেকে যাচাই করো"},{s:"",t:"ভুল গুলো ঠিক করে নাও"}]},
+  {d:29,tasks:[{s:"Bangla 1st",t:"সেইদিন এই মাঠ"},{s:"English 1st",t:"Completing Stories"},{s:"Physics",t:"অধ্যায় ৭: তরঙ্গ ও শব্দ"}]},
+  {d:30,tasks:[{s:"Bangla 2nd",t:"প্রতিশব্দ / বিপরীত শব্দ"},{s:"Biology",t:"অধ্যায় ১১: জীবের প্রজনন"},{s:"Chemistry",t:"অধ্যায় ৯: এসিড-ক্ষারক সমতা"}]},
+  {d:31,tasks:[{s:"Bangla 1st",t:"যাব আমি তোমার দেশে"},{s:"English 1st",t:"Writing Dialogues"},{s:"Math",t:"অধ্যায় ৯: ত্রিকোণমিতিক অনুপাত"}]},
+  {d:32,tasks:[{s:"Bangla 2nd",t:"সারাংশ ও সারমর্ম / ভাব-সম্প্রসারণ"},{s:"BGS",t:"জাতীয় সম্পদ ও অর্থনৈতিক ব্যবস্থা"},{s:"H.math",t:"অধ্যায় ১০: দ্বিপদী বিস্তৃতি"}]},
+  {d:33,tasks:[{s:"Bangla 1st",t:"আমি কোন আগন্তুক নই"},{s:"Physics",t:"অধ্যায় ৮: আলোর প্রতিফলন"},{s:"Biology",t:"অধ্যায় ১২: জীবের বংশগতি ও বিবর্তন"}]},
+  {d:34,tasks:[{s:"Bangla 2nd",t:"চিঠিপত্র / সংবাদ প্রতিবেদন"},{s:"Biology",t:"অধ্যায় ১৩: জীবের পরিবেশ"},{s:"BGS",t:"অর্থনৈতিক নির্দেশকসমূহ ও বাংলাদেশের অর্থনীতির প্রকৃতি"}]},
+  {d:35,revision:true,tasks:[{s:"",t:"সারা সপ্তাহের পড়া রিভিশন দাও"},{s:"",t:"এক্সাম দিয়ে নিজেকে যাচাই করো"},{s:"",t:"ভুল গুলো ঠিক করে নাও"}]},
+  {d:36,tasks:[{s:"Bangla 1st",t:"রানার"},{s:"ICT",t:"অধ্যায় ২: কম্পিউটার রক্ষণাবেক্ষণ ও সাইবার নিরাপত্তা"},{s:"Physics",t:"অধ্যায় ১০: স্থির বিদ্যুৎ"}]},
+  {d:37,tasks:[{s:"Bangla 2nd",t:"অনুচ্ছেদ / প্রবন্ধ"},{s:"BGS",t:"বাংলাদেশ সরকারের অর্থ ও ব্যাংক ব্যবস্থা"},{s:"Chemistry",t:"অধ্যায় ১০: খনিজ সম্পদ: ধাতু-অধাতু"}]},
+  {d:38,tasks:[{s:"Bangla 1st",t:"তোমাকে পাওয়ার জন্যে, হে স্বাধীনতা"},{s:"Chemistry",t:"অধ্যায় ১১: খনিজ সম্পদ: জীবাশ্ম"},{s:"Math",t:"অধ্যায় ১০: দূরত্ব ও উচ্চতা"}]},
+  {d:39,tasks:[{s:"Biology",t:"অধ্যায় ১৪: জীবপ্রযুক্তি"},{s:"BGS",t:"বাংলাদেশের পরিবার কাঠামো ও সামাজিকীকরণ"},{s:"H.math",t:"অধ্যায় ১১: স্থানাঙ্ক জ্যামিতি"}]},
+  {d:40,tasks:[{s:"H.math",t:"অধ্যায় ১২: সমতলীয় ভেক্টর"},{s:"ICT",t:"অধ্যায় ৫: মাল্টিমিডিয়া ও গ্রাফিক্স"},{s:"Dhormo",t:"ধর্ম"}]},
+  {d:41,tasks:[{s:"BGS",t:"বাংলাদেশের সামাজিক পরিবর্তন"},{s:"H.math",t:"অধ্যায় ১৪: সম্ভাবনা"},{s:"Math",t:"অধ্যায় ১৩: সসীম ধারা"}]},
+  {d:42,revision:true,tasks:[{s:"",t:"সারা সপ্তাহের পড়া রিভিশন দাও"},{s:"",t:"এক্সাম দিয়ে নিজেকে যাচাই করো"},{s:"",t:"ভুল গুলো ঠিক করে নাও"}]},
+  {d:43,tasks:[{s:"Math",t:"অধ্যায় ১৬: পরিমিতি"},{s:"BGS",t:"বাংলাদেশের সামাজিক সমস্যা ও প্রতিকার"},{s:"Physics",t:"অধ্যায় ১১: চল বিদ্যুৎ"}]},
+  {d:44,tasks:[{s:"H.math",t:"অধ্যায় ১৩: ঘন জ্যামিতি"},{s:"ICT",t:"অধ্যায় ৬: প্রোগ্রামিংয়ের মাধ্যমে সমস্যার সমাধান"},{s:"Chemistry",t:"অধ্যায় ১২: আমাদের জীবনে রসায়ন"}]},
+  {d:45,tasks:[{s:"Dhormo",t:"ধর্ম"},{s:"Dhormo",t:"ধর্ম"},{s:"Math",t:"অধ্যায় ১৭: পরিসংখ্যান"}]},
+];
+const weeks=[
+  {label:"সপ্তাহ ১",days:[1,2,3,4,5,6,7]},
+  {label:"সপ্তাহ ২",days:[8,9,10,11,12,13,14]},
+  {label:"সপ্তাহ ৩",days:[15,16,17,18,19,20,21]},
+  {label:"সপ্তাহ ৪",days:[22,23,24,25,26,27,28]},
+  {label:"সপ্তাহ ৫",days:[29,30,31,32,33,34,35]},
+  {label:"সপ্তাহ ৬",days:[36,37,38,39,40,41,42]},
+  {label:"সপ্তাহ ৭",days:[43,44,45]},
+];
+const subjectClass={
+  "Bangla 1st":"sb-bangla","Bangla 2nd":"sb-bangla",
+  "English 1st":"sb-english","English 2nd":"sb-english",
+  "Physics":"sb-physics","Chemistry":"sb-chemistry",
+  "Biology":"sb-biology","Math":"sb-math","H.math":"sb-hmath",
+  "BGS":"sb-bgs","ICT":"sb-ict","Dhormo":"sb-dhormo","":" "
+};
+</script>
+</body>
+</html>
