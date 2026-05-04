@@ -29,21 +29,7 @@
   let currentUser = null;
   let state = {};
 
-  auth.onAuthStateChanged(user => {
-    if (user) {
-      currentUser = user;
-      showApp(user);
-      const dbRef = db.ref(`users/${user.uid}/progress`);
-      dbRef.on('value', snapshot => {
-        state = snapshot.val() || {};
-        renderTracker();
-        updateProgress();
-      });
-    } else {
-      currentUser = null;
-      showLogin();
-    }
-  });
+  // This section is now integrated into the auth.onAuthStateChanged above
 
   function loginWithGoogle() {
     auth.signInWithPopup(provider).catch(e => {
@@ -169,7 +155,127 @@
     } else {
       avatar.textContent = (user.displayName || 'U')[0].toUpperCase();
     }
+    loadLeaderboard();
   }
+
+  function toggleLeaderboard() {
+    const lb = document.getElementById('leaderboard');
+    if (lb.style.display === 'none') {
+      lb.style.display = 'flex';
+      loadLeaderboard();
+    } else {
+      lb.style.display = 'none';
+    }
+  }
+
+  function loadLeaderboard() {
+    const usersRef = db.ref('users');
+    usersRef.once('value', snapshot => {
+      const users = [];
+      snapshot.forEach(userSnap => {
+        const uid = userSnap.key;
+        const progress = userSnap.child('progress').val() || {};
+        const profile = userSnap.child('profile').val() || {};
+        
+        let total = 0, done = 0;
+        for (const key in progress) {
+          if (!key.startsWith('d') || key.includes('revision')) continue;
+          total++;
+          if (progress[key]) done++;
+        }
+        
+        // Count total tasks properly
+        days.forEach(day => {
+          if (!day.revision) {
+            day.tasks.forEach(() => total++);
+          }
+        });
+        total = 126; // Fixed total for all users
+        
+        const pct = total ? Math.round(done / total * 100) : 0;
+        
+        users.push({
+          uid,
+          name: profile.name || 'Unknown User',
+          email: profile.email || '',
+          photoURL: profile.photoURL || '',
+          done,
+          total,
+          pct
+        });
+      });
+      
+      users.sort((a, b) => b.pct - a.pct || b.done - a.done);
+      renderLeaderboard(users);
+    });
+  }
+
+  function renderLeaderboard(users) {
+    const list = document.getElementById('lb-list');
+    if (!users.length) {
+      list.innerHTML = '<div class="loading">এখনও কেউ নেই</div>';
+      return;
+    }
+    
+    list.innerHTML = '';
+    users.forEach((u, i) => {
+      const item = document.createElement('div');
+      item.className = 'lb-item' + (u.uid === currentUser.uid ? ' lb-you' : '');
+      
+      const rank = document.createElement('div');
+      rank.className = 'lb-rank';
+      if (i === 0) rank.className += ' top1';
+      else if (i === 1) rank.className += ' top2';
+      else if (i === 2) rank.className += ' top3';
+      rank.textContent = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+      
+      const userDiv = document.createElement('div');
+      userDiv.className = 'lb-user';
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'lb-user-name';
+      nameDiv.textContent = u.name + (u.uid === currentUser.uid ? ' (You)' : '');
+      userDiv.appendChild(nameDiv);
+      
+      const progDiv = document.createElement('div');
+      progDiv.className = 'lb-progress';
+      const pctDiv = document.createElement('div');
+      pctDiv.className = 'lb-pct';
+      pctDiv.textContent = u.pct + '%';
+      const tasksDiv = document.createElement('div');
+      tasksDiv.className = 'lb-tasks';
+      tasksDiv.textContent = u.done + '/' + u.total;
+      progDiv.appendChild(pctDiv);
+      progDiv.appendChild(tasksDiv);
+      
+      item.appendChild(rank);
+      item.appendChild(userDiv);
+      item.appendChild(progDiv);
+      list.appendChild(item);
+    });
+  }
+
+  // Save user profile on login
+  auth.onAuthStateChanged(user => {
+    if (user) {
+      currentUser = user;
+      // Save profile
+      db.ref(`users/${user.uid}/profile`).set({
+        name: user.displayName || user.email,
+        email: user.email,
+        photoURL: user.photoURL || ''
+      });
+      showApp(user);
+      const dbRef = db.ref(`users/${user.uid}/progress`);
+      dbRef.on('value', snapshot => {
+        state = snapshot.val() || {};
+        renderTracker();
+        updateProgress();
+      });
+    } else {
+      currentUser = null;
+      showLogin();
+    }
+  });
 </script>
 
 <style>
@@ -282,6 +388,55 @@ header::after{
 .sb-dhormo{background:#F1EFE8;color:#5F5E5A}
 .loading{text-align:center;padding:3rem;color:var(--text3);font-size:15px}
 
+.leaderboard-toggle{
+  max-width:680px;margin:0 auto;padding:0.75rem 1rem;
+}
+.leaderboard-toggle button{
+  width:100%;padding:12px;background:var(--accent);color:white;
+  border:none;border-radius:10px;font-family:'Hind Siliguri',sans-serif;
+  font-size:15px;font-weight:600;cursor:pointer;transition:background 0.2s;
+}
+.leaderboard-toggle button:hover{background:var(--accent2)}
+
+.leaderboard-panel{
+  position:fixed;top:0;left:0;right:0;bottom:0;
+  background:rgba(0,0,0,0.5);z-index:100;
+  display:flex;align-items:center;justify-content:center;padding:1rem;
+}
+.lb-header{
+  background:var(--accent);color:white;padding:1rem 1.25rem;
+  border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center;
+}
+.lb-header h2{font-family:'Tiro Bangla',serif;font-size:20px;font-weight:400}
+.lb-close{
+  background:rgba(255,255,255,0.2);border:none;color:white;
+  width:32px;height:32px;border-radius:50%;cursor:pointer;
+  font-size:18px;transition:background 0.2s;
+}
+.lb-close:hover{background:rgba(255,255,255,0.3)}
+.lb-content{
+  background:var(--card);max-width:500px;width:100%;
+  max-height:60vh;overflow-y:auto;border-radius:0 0 12px 12px;
+}
+.lb-item{
+  padding:12px 1.25rem;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:12px;
+}
+.lb-item:last-child{border-bottom:none}
+.lb-rank{
+  font-size:18px;font-weight:700;color:var(--text3);min-width:35px;
+}
+.lb-rank.top1{color:#FFD700}
+.lb-rank.top2{color:#C0C0C0}
+.lb-rank.top3{color:#CD7F32}
+.lb-user{flex:1}
+.lb-user-name{font-size:14px;font-weight:600;color:var(--text)}
+.lb-user-email{font-size:12px;color:var(--text3);margin-top:2px}
+.lb-progress{text-align:right}
+.lb-pct{font-size:20px;font-weight:700;color:var(--accent)}
+.lb-tasks{font-size:11px;color:var(--text3);margin-top:2px}
+.lb-you{background:var(--week-bg)}
+
 @media(max-width:480px){
   header{padding:1rem}
   .header-left h1{font-size:17px}
@@ -326,6 +481,20 @@ header::after{
   <div class="prog-wrap">
     <div class="prog-bar-outer"><div class="prog-bar-inner" id="pbar"></div></div>
     <div class="prog-label" id="plabel">লোড হচ্ছে...</div>
+  </div>
+
+  <div class="leaderboard-toggle">
+    <button onclick="toggleLeaderboard()" id="lb-btn">🏆 Leaderboard দেখো</button>
+  </div>
+
+  <div class="leaderboard-panel" id="leaderboard" style="display:none">
+    <div class="lb-header">
+      <h2>🏆 Progress Leaderboard</h2>
+      <button class="lb-close" onclick="toggleLeaderboard()">✕</button>
+    </div>
+    <div class="lb-content" id="lb-list">
+      <div class="loading">Leaderboard লোড হচ্ছে...</div>
+    </div>
   </div>
 
   <div class="content">
