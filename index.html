@@ -6,13 +6,11 @@
 <title>Mission Comeback — 45 Days</title>
 <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600&family=Tiro+Bangla&display=swap" rel="stylesheet">
 
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
-    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getDatabase, ref, set, onValue }
-    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 
+<script>
   const firebaseConfig = {
     apiKey: "AIzaSyBHJwML38xroJoCCJ-uuzA-BUSehpyDhCM",
     authDomain: "choll-comeback-deii.firebaseapp.com",
@@ -23,20 +21,20 @@
     appId: "1:199480008082:web:70739d9efd0bc13ee4754b"
   };
 
-  const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db = getDatabase(app);
-  const provider = new GoogleAuthProvider();
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.database();
+  const provider = new firebase.auth.GoogleAuthProvider();
 
   let currentUser = null;
   let state = {};
 
-  onAuthStateChanged(auth, user => {
+  auth.onAuthStateChanged(user => {
     if (user) {
       currentUser = user;
       showApp(user);
-      const dbRef = ref(db, `users/${user.uid}/progress`);
-      onValue(dbRef, snapshot => {
+      const dbRef = db.ref(`users/${user.uid}/progress`);
+      dbRef.on('value', snapshot => {
         state = snapshot.val() || {};
         renderTracker();
         updateProgress();
@@ -47,25 +45,23 @@
     }
   });
 
-  window.loginWithGoogle = async () => {
-    try {
-      await signInWithPopup(auth, provider);
-    } catch(e) {
+  function loginWithGoogle() {
+    auth.signInWithPopup(provider).catch(e => {
       alert("Login হয়নি: " + e.message);
-    }
-  };
+    });
+  }
 
-  window.logout = async () => {
-    await signOut(auth);
-  };
+  function logout() {
+    auth.signOut();
+  }
 
-  window.saveKey = async (key, val) => {
+  function saveKey(key, val) {
     state[key] = val;
-    await set(ref(db, `users/${currentUser.uid}/progress/${key}`), val);
+    db.ref(`users/${currentUser.uid}/progress/${key}`).set(val);
     updateProgress();
-  };
+  }
 
-  window.updateProgress = () => {
+  function updateProgress() {
     const allCbs = document.querySelectorAll('.task-cb');
     let total = 0, done = 0;
     allCbs.forEach(cb => {
@@ -77,7 +73,7 @@
     if (bar) bar.style.width = pct + '%';
     if (lbl) lbl.textContent = done + ' / ' + total + ' (' + pct + '%)';
     updateWeekBadges();
-  };
+  }
 
   function updateWeekBadges() {
     document.querySelectorAll('.week-block').forEach(wb => {
@@ -89,7 +85,7 @@
     });
   }
 
-  window.renderTracker = () => {
+  function renderTracker() {
     const tracker = document.getElementById('tracker');
     if (!tracker) return;
     tracker.innerHTML = '';
@@ -129,7 +125,7 @@
           if (day.revision) cb.dataset.revision = '1';
           cb.addEventListener('change', function() {
             span.className = 'task-text' + (this.checked ? ' done' : '');
-            window.saveKey(key, this.checked);
+            saveKey(key, this.checked);
           });
           const span = document.createElement('span');
           span.className = 'task-text' + (checked ? ' done' : '');
@@ -154,7 +150,7 @@
     });
 
     updateWeekBadges();
-  };
+  }
 
   function showLogin() {
     document.getElementById('login-screen').style.display = 'flex';
